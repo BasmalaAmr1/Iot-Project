@@ -1,0 +1,404 @@
+[
+  {
+    "id": "gateway-main",
+    "type": "tab",
+    "label": "IoT Gateway - MQTT to CoAP",
+    "disabled": false,
+    "info": "Gateway for translating MQTT commands to CoAP and aggregating telemetry"
+  },
+  {
+    "id": "mqtt-in-telemetry",
+    "type": "mqtt in",
+    "z": "gateway-main",
+    "name": "MQTT Telemetry In",
+    "topic": "campus/b01/+/+/telemetry",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "hivemq-local",
+    "nl": false,
+    "rap": false,
+    "inputs": 0,
+    "x": 150,
+    "y": 100,
+    "wires": [
+      [
+        "telemetry-processor"
+      ]
+    ]
+  },
+  {
+    "id": "telemetry-processor",
+    "type": "function",
+    "z": "gateway-main",
+    "name": "Process Telemetry",
+    "func": "// Process and enhance telemetry data\nmsg.enhanced = {\n  protocol: 'MQTT',\n  gateway_timestamp: Date.now(),\n  floor: msg.topic.split('/')[2],\n  room_id: msg.payload.sensor_id,\n  temperature: msg.payload.temperature,\n  humidity: msg.payload.humidity,\n  occupancy: msg.payload.occupancy,\n  hvac_mode: msg.payload.hvac_mode,\n  source_topic: msg.topic\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 100,
+    "wires": [
+      [
+        "thingsboard-out",
+        "edge-thinning"
+      ]
+    ]
+  },
+  {
+    "id": "thingsboard-out",
+    "type": "http request",
+    "z": "gateway-main",
+    "name": "Send to ThingsBoard",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "http://localhost:9090/api/v1/telemetry",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "senderr": false,
+    "x": 650,
+    "y": 50,
+    "wires": [
+      [
+        "debug-thingsboard"
+      ]
+    ]
+  },
+  {
+    "id": "debug-thingsboard",
+    "type": "debug",
+    "z": "gateway-main",
+    "name": "ThingsBoard Debug",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 850,
+    "y": 50,
+    "wires": []
+  },
+  {
+    "id": "edge-thinning",
+    "type": "function",
+    "z": "gateway-main",
+    "name": "Edge Thinning (60s)",
+    "func": "// Edge thinning - aggregate every 60 seconds\nconst context = this || {};\nconst floor = msg.enhanced.floor;\n\nif (!context.floorData) {\n  context.floorData = {};\n}\n\nif (!context.floorData[floor]) {\n  context.floorData[floor] = {\n    temperatures: [],\n    humidity: [],\n    occupancy: [],\n    lastReset: Date.now()\n  };\n}\n\nconst data = context.floorData[floor];\nconst now = Date.now();\n\n// Add current data\ndata.temperatures.push(msg.enhanced.temperature);\ndata.humidity.push(msg.enhanced.humidity);\ndata.occupancy.push(msg.enhanced.occupancy ? 1 : 0);\n\n// Check if 60 seconds have passed\nif (now - data.lastReset >= 60000) {\n  // Calculate averages\n  const avgTemp = data.temperatures.reduce((a, b) => a + b, 0) / data.temperatures.length;\n  const avgHumidity = data.humidity.reduce((a, b) => a + b, 0) / data.humidity.length;\n  const avgOccupancy = data.occupancy.reduce((a, b) => a + b, 0) / data.occupancy.length;\n  \n  // Create aggregated message\n  msg.aggregated = {\n    floor: floor,\n    timestamp: now,\n    avg_temperature: Math.round(avgTemp * 10) / 10,\n    avg_humidity: Math.round(avgHumidity * 10) / 10,\n    avg_occupancy: Math.round(avgOccupancy * 100),\n    sample_count: data.temperatures.length,\n    gateway_id: 'floor-' + floor + '-gateway'\n  };\n  \n  // Reset data\n  data.temperatures = [];\n  data.humidity = [];\n  data.occupancy = [];\n  data.lastReset = now;\n  \n  return msg;\n}\n\n// Don't send message if not time yet\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 150,
+    "wires": [
+      [
+        "aggregated-debug"
+      ]
+    ]
+  },
+  {
+    "id": "aggregated-debug",
+    "type": "debug",
+    "z": "gateway-main",
+    "name": "Aggregated Debug",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "aggregated",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 850,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "mqtt-in-commands",
+    "type": "mqtt in",
+    "z": "gateway-main",
+    "name": "MQTT Commands In",
+    "topic": "campus/b01/+/+/cmd",
+    "qos": "2",
+    "datatype": "json",
+    "broker": "hivemq-local",
+    "nl": false,
+    "rap": false,
+    "inputs": 0,
+    "x": 150,
+    "y": 250,
+    "wires": [
+      [
+        "command-router"
+      ]
+    ]
+  },
+  {
+    "id": "command-router",
+    "type": "switch",
+    "z": "gateway-main",
+    "name": "Route Commands",
+    "property": "payload",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "hask",
+        "v": "hvac",
+        "vt": "msg"
+      },
+      {
+        "t": "hask",
+        "v": "lighting",
+        "vt": "msg"
+      },
+      {
+        "t": "hask",
+        "v": "target_temp",
+        "vt": "msg"
+      },
+      {
+        "t": "else"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 4,
+    "x": 400,
+    "y": 250,
+    "wires": [
+      [
+        "hvac-translator"
+      ],
+      [
+        "lighting-translator"
+      ],
+      [
+        "temp-translator"
+      ],
+      [
+        "generic-translator"
+      ]
+    ]
+  },
+  {
+    "id": "hvac-translator",
+    "type": "function",
+    "z": "gateway-main",
+    "name": "HVAC to CoAP",
+    "func": "// Translate HVAC command to CoAP\nconst topic_parts = msg.topic.split('/');\nconst room_id = topic_parts[3];\nconst floor = topic_parts[2];\n\n// Map room to CoAP port (simplified)\nconst room_num = parseInt(room_id.split('-r')[1]);\nconst coap_port = 5683 + room_num - 1;\n\nmsg.coap_command = {\n  hvac_mode: msg.payload.hvac_mode || msg.payload.hvac,\n  timestamp: Date.now(),\n  source: 'mqtt-gateway'\n};\n\nmsg.coap_url = `coap://localhost:${coap_port}/actuators`;\nmsg.room_id = room_id;\nmsg.floor = floor;\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 200,
+    "wires": [
+      [
+        "coap-out-hvac"
+      ]
+    ]
+  },
+  {
+    "id": "coap-out-hvac",
+    "type": "coap request",
+    "z": "gateway-main",
+    "name": "CoAP PUT HVAC",
+    "method": "PUT",
+    "url": "coap://localhost:5683/actuators",
+    "payload": "msg.coap_command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 200,
+    "wires": [
+      [
+        "coap-response-debug"
+      ]
+    ]
+  },
+  {
+    "id": "coap-response-debug",
+    "type": "debug",
+    "z": "gateway-main",
+    "name": "CoAP Response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1100,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "lighting-translator",
+    "type": "function",
+    "z": "gateway-main",
+    "name": "Lighting to CoAP",
+    "func": "// Translate lighting command to CoAP\nconst topic_parts = msg.topic.split('/');\nconst room_id = topic_parts[3];\nconst floor = topic_parts[2];\n\n// Map room to CoAP port\nconst room_num = parseInt(room_id.split('-r')[1]);\nconst coap_port = 5683 + room_num - 1;\n\nmsg.coap_command = {\n  lighting_dimmer: msg.payload.lighting_dimmer,\n  timestamp: Date.now(),\n  source: 'mqtt-gateway'\n};\n\nmsg.coap_url = `coap://localhost:${coap_port}/actuators`;\nmsg.room_id = room_id;\nmsg.floor = floor;\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 250,
+    "wires": [
+      [
+        "coap-out-lighting"
+      ]
+    ]
+  },
+  {
+    "id": "coap-out-lighting",
+    "type": "coap request",
+    "z": "gateway-main",
+    "name": "CoAP PUT Lighting",
+    "method": "PUT",
+    "url": "coap://localhost:5684/actuators",
+    "payload": "msg.coap_command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 250,
+    "wires": [
+      [
+        "coap-response-debug"
+      ]
+    ]
+  },
+  {
+    "id": "temp-translator",
+    "type": "function",
+    "z": "gateway-main",
+    "name": "Temp to CoAP",
+    "func": "// Translate temperature command to CoAP\nconst topic_parts = msg.topic.split('/');\nconst room_id = topic_parts[3];\nconst floor = topic_parts[2];\n\n// Map room to CoAP port\nconst room_num = parseInt(room_id.split('-r')[1]);\nconst coap_port = 5683 + room_num - 1;\n\nmsg.coap_command = {\n  target_temp: msg.payload.target_temp,\n  timestamp: Date.now(),\n  source: 'mqtt-gateway'\n};\n\nmsg.coap_url = `coap://localhost:${coap_port}/actuators`;\nmsg.room_id = room_id;\nmsg.floor = floor;\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 300,
+    "wires": [
+      [
+        "coap-out-temp"
+      ]
+    ]
+  },
+  {
+    "id": "coap-out-temp",
+    "type": "coap request",
+    "z": "gateway-main",
+    "name": "CoAP PUT Temp",
+    "method": "PUT",
+    "url": "coap://localhost:5685/actuators",
+    "payload": "msg.coap_command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 300,
+    "wires": [
+      [
+        "coap-response-debug"
+      ]
+    ]
+  },
+  {
+    "id": "generic-translator",
+    "type": "function",
+    "z": "gateway-main",
+    "name": "Generic to CoAP",
+    "func": "// Translate generic command to CoAP\nconst topic_parts = msg.topic.split('/');\nconst room_id = topic_parts[3];\nconst floor = topic_parts[2];\n\n// Map room to CoAP port\nconst room_num = parseInt(room_id.split('-r')[1]);\nconst coap_port = 5683 + room_num - 1;\n\nmsg.coap_command = {\n  ...msg.payload,\n  timestamp: Date.now(),\n  source: 'mqtt-gateway'\n};\n\nmsg.coap_url = `coap://localhost:${coap_port}/actuators`;\nmsg.room_id = room_id;\nmsg.floor = floor;\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 350,
+    "wires": [
+      [
+        "coap-out-generic"
+      ]
+    ]
+  },
+  {
+    "id": "coap-out-generic",
+    "type": "coap request",
+    "z": "gateway-main",
+    "name": "CoAP PUT Generic",
+    "method": "PUT",
+    "url": "coap://localhost:5686/actuators",
+    "payload": "msg.coap_command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 350,
+    "wires": [
+      [
+        "coap-response-debug"
+      ]
+    ]
+  },
+  {
+    "id": "hivemq-local",
+    "type": "mqtt-broker",
+    "name": "Local HiveMQ",
+    "broker": "localhost",
+    "port": "1883",
+    "tls": "",
+    "clientid": "",
+    "autoConnect": true,
+    "credentials": "",
+    "usetls": false,
+    "protocol": "mqtt",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  }
+]

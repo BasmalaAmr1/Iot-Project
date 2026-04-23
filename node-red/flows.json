@@ -1,0 +1,438 @@
+[
+  {
+    "id": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "type": "tab",
+    "label": "Floor 01 - IoT Gateway",
+    "disabled": false,
+    "info": "Floor 01 Gateway with MQTT subscription, CoAP observation, and edge thinning"
+  },
+  {
+    "id": "mqtt-sub-001",
+    "type": "mqtt in",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Floor 01 MQTT Telemetry",
+    "topic": "campus/b01/f01/+/telemetry",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "hivemq-broker",
+    "nl": false,
+    "rap": false,
+    "inputs": 0,
+    "x": 150,
+    "y": 100,
+    "wires": [
+      [
+        "mqtt-parser-001",
+        "edge-thinning-001"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-parser-001",
+    "type": "function",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Parse MQTT Telemetry",
+    "func": "// Parse MQTT telemetry and add metadata\nmsg.parsed = {\n  protocol: 'MQTT',\n  floor: '01',\n  room_id: msg.payload.sensor_id,\n  timestamp: msg.payload.timestamp,\n  temperature: msg.payload.temperature,\n  humidity: msg.payload.humidity,\n  occupancy: msg.payload.occupancy,\n  hvac_mode: msg.payload.hvac_mode,\n  source_topic: msg.topic\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 100,
+    "wires": [
+      [
+        "thingsboard-001"
+      ]
+    ]
+  },
+  {
+    "id": "thingsboard-001",
+    "type": "http request",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Send to ThingsBoard",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "http://thingsboard:9090/api/v1/telemetry",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "senderr": false,
+    "x": 650,
+    "y": 100,
+    "wires": [
+      [
+        "debug-001"
+      ]
+    ]
+  },
+  {
+    "id": "debug-001",
+    "type": "debug",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Debug MQTT",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 850,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "mqtt-cmd-001",
+    "type": "mqtt in",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Floor 01 MQTT Commands",
+    "topic": "campus/b01/f01/+/cmd",
+    "qos": "2",
+    "datatype": "json",
+    "broker": "hivemq-broker",
+    "nl": false,
+    "rap": false,
+    "inputs": 0,
+    "x": 150,
+    "y": 200,
+    "wires": [
+      [
+        "cmd-router-001"
+      ]
+    ]
+  },
+  {
+    "id": "cmd-router-001",
+    "type": "switch",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Route Commands",
+    "property": "payload",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "hask",
+        "v": "hvac",
+        "vt": "msg"
+      },
+      {
+        "t": "hask",
+        "v": "lighting_dimmer",
+        "vt": "msg"
+      },
+      {
+        "t": "else"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 3,
+    "x": 400,
+    "y": 200,
+    "wires": [
+      [
+        "hvac-handler-001"
+      ],
+      [
+        "lighting-handler-001"
+      ],
+      [
+        "generic-handler-001"
+      ]
+    ]
+  },
+  {
+    "id": "hvac-handler-001",
+    "type": "function",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "HVAC Command Handler",
+    "func": "// Process HVAC commands\nconst room_id = msg.topic.split('/')[3];\nmsg.command = {\n  hvac_mode: msg.payload.hvac.toUpperCase(),\n  timestamp: Date.now()\n};\nmsg.target_room = room_id;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 150,
+    "wires": [
+      [
+        "coap-translator-001"
+      ]
+    ]
+  },
+  {
+    "id": "coap-translator-001",
+    "type": "coap request",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "MQTT to CoAP PUT",
+    "method": "PUT",
+    "url": "coap://localhost:5683/actuators",
+    "payload": "msg.command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 150,
+    "wires": [
+      [
+        "debug-coap-001"
+      ]
+    ]
+  },
+  {
+    "id": "debug-coap-001",
+    "type": "debug",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Debug CoAP",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1100,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "lighting-handler-001",
+    "type": "function",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Lighting Command Handler",
+    "func": "// Process lighting commands\nconst room_id = msg.topic.split('/')[3];\nmsg.command = {\n  lighting_dimmer: msg.payload.lighting_dimmer,\n  timestamp: Date.now()\n};\nmsg.target_room = room_id;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 200,
+    "wires": [
+      [
+        "coap-translator-002"
+      ]
+    ]
+  },
+  {
+    "id": "coap-translator-002",
+    "type": "coap request",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "MQTT to CoAP PUT",
+    "method": "PUT",
+    "url": "coap://localhost:5684/actuators",
+    "payload": "msg.command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 200,
+    "wires": [
+      [
+        "debug-coap-002"
+      ]
+    ]
+  },
+  {
+    "id": "debug-coap-002",
+    "type": "debug",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Debug CoAP",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1100,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "generic-handler-001",
+    "type": "function",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Generic Command Handler",
+    "func": "// Process generic commands\nconst room_id = msg.topic.split('/')[3];\nmsg.command = msg.payload;\nmsg.command.timestamp = Date.now();\nmsg.target_room = room_id;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 250,
+    "wires": [
+      [
+        "coap-translator-003"
+      ]
+    ]
+  },
+  {
+    "id": "coap-translator-003",
+    "type": "coap request",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "MQTT to CoAP PUT",
+    "method": "PUT",
+    "url": "coap://localhost:5685/actuators",
+    "payload": "msg.command",
+    "contentType": "application/json",
+    "confirmable": true,
+    "observe": false,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 900,
+    "y": 250,
+    "wires": [
+      [
+        "debug-coap-003"
+      ]
+    ]
+  },
+  {
+    "id": "debug-coap-003",
+    "type": "debug",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Debug CoAP",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1100,
+    "y": 250,
+    "wires": []
+  },
+  {
+    "id": "coap-obs-001",
+    "type": "coap request",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "CoAP Observation",
+    "method": "GET",
+    "url": "coap://localhost:5683/telemetry",
+    "observe": true,
+    "confirmable": true,
+    "block1": false,
+    "block2": false,
+    "size1": 1024,
+    "size2": 1024,
+    "x": 150,
+    "y": 350,
+    "wires": [
+      [
+        "coap-parser-001"
+      ]
+    ]
+  },
+  {
+    "id": "coap-parser-001",
+    "type": "json",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Parse CoAP Telemetry",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 400,
+    "y": 350,
+    "wires": [
+      [
+        "coap-to-mqtt-001"
+      ]
+    ]
+  },
+  {
+    "id": "coap-to-mqtt-001",
+    "type": "mqtt out",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "CoAP to MQTT Bridge",
+    "topic": "campus/b01/f01/coap-telemetry",
+    "qos": "1",
+    "retain": "false",
+    "broker": "hivemq-broker",
+    "x": 650,
+    "y": 350,
+    "wires": []
+  },
+  {
+    "id": "edge-thinning-001",
+    "type": "function",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Edge Thinning (60s)",
+    "func": "// Edge thinning - average every 60 seconds\nconst context = this || {};\nif (!context.floorData) {\n  context.floorData = {\n    temperatures: [],\n    humidity: [],\n    occupancy: [],\n    lastReset: Date.now()\n  };\n}\n\nconst now = Date.now();\nconst data = context.floorData;\n\n// Add current data\ndata.temperatures.push(msg.payload.temperature);\ndata.humidity.push(msg.payload.humidity);\ndata.occupancy.push(msg.payload.occupancy ? 1 : 0);\n\n// Check if 60 seconds have passed\nif (now - data.lastReset >= 60000) {\n  // Calculate averages\n  const avgTemp = data.temperatures.reduce((a, b) => a + b, 0) / data.temperatures.length;\n  const avgHumidity = data.humidity.reduce((a, b) => a + b, 0) / data.humidity.length;\n  const avgOccupancy = data.occupancy.reduce((a, b) => a + b, 0) / data.occupancy.length;\n  \n  // Create aggregated message\n  msg.aggregated = {\n    floor: '01',\n    timestamp: now,\n    avg_temperature: Math.round(avgTemp * 10) / 10,\n    avg_humidity: Math.round(avgHumidity * 10) / 10,\n    avg_occupancy: Math.round(avgOccupancy * 100),\n    sample_count: data.temperatures.length\n  };\n  \n  // Reset data\n  data.temperatures = [];\n  data.humidity = [];\n  data.occupancy = [];\n  data.lastReset = now;\n  \n  return msg;\n}\n\n// Don't send message if not time yet\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 450,
+    "wires": [
+      [
+        "aggregated-debug-001"
+      ]
+    ]
+  },
+  {
+    "id": "aggregated-debug-001",
+    "type": "debug",
+    "z": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
+    "name": "Debug Aggregated",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "aggregated",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 650,
+    "y": 450,
+    "wires": []
+  },
+  {
+    "id": "hivemq-broker",
+    "type": "mqtt-broker",
+    "name": "HiveMQ Broker",
+    "broker": "hivemq",
+    "port": "1883",
+    "tls": "",
+    "clientid": "",
+    "autoConnect": true,
+    "credentials": "",
+    "usetls": false,
+    "protocol": "mqtt",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  }
+]
